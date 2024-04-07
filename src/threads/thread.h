@@ -84,6 +84,7 @@ struct thread
   {
     /* Owned by thread.c. */
     tid_t tid;                          /* Thread identifier. */
+    int64_t wakeuptime;                 /*chanhaeng's code*/
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
@@ -112,6 +113,10 @@ void thread_start (void);
 
 void thread_tick (void);
 void thread_print_stats (void);
+
+/*Chanhaeng's code*/
+void thread_sleep(int64_t ticks);
+void thread_wakeup(int64_t ticks);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
