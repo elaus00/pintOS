@@ -195,6 +195,34 @@ thread_print_stats (void)
           idle_ticks, kernel_ticks, user_ticks);
 }
 
+
+/* 스레드를 ready_list에 추가할 때 순서에 맞게 삽입하도록 하는 코드 */
+void
+thread_add_to_ready_list(struct thread *t) 
+{
+  struct list_elem *e;
+
+  // 리스트가 비어있는 경우 t를 리스트에 삽입
+  if (list_empty(&ready_list)) {
+    list_push_back(&ready_list, &t->elem);
+    return;
+  }
+
+  // 리스트 순회
+  for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
+    struct thread *cur = list_entry(e, struct thread, elem); // ready_list에 들어가 있는 현재 스레드의 위치를 파악한다.
+
+    // 삽입할 위치를 찾으면 리스트에 삽입하고 함수를 종료한다.
+    if (t->priority > cur->priority) {
+      list_insert(e, &t->elem);
+      return;
+    }
+  }
+
+  // 리스트의 끝까지 순회한 경우 t를 리스트의 맨 뒤에 삽입합니다.
+  list_push_back(&ready_list, &t->elem);
+}
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
@@ -254,8 +282,8 @@ thread_create (const char *name, int priority,
 
   intr_set_level (old_level);
 
-  /* Add to run queue. */
-  thread_unblock (t);
+  /* Add to run queue with priority */
+  thread_add_to_ready_list(&t);
 
   return tid;
 }
@@ -293,7 +321,9 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  //ready_list로 넣을 때 priority 지켜서 넣도록하는 함수
+  thread_add_to_ready_list(&t);
+  //list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -364,7 +394,8 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    thread_add_to_ready_list(&cur);
+    //list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -391,7 +422,10 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  struct thread *cur = thread_current();
+  if (new_priority > cur->priority){
+      cur->priority = new_priority;
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -511,6 +545,10 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
 
+  struct thread *cur = thread_current ();
+  // 기존에 실행중인 스레드와 우선순위 비교
+  if (cur->priority < priority)
+    thread_yield ();
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
