@@ -102,6 +102,8 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
+  //change_occupation();
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -166,18 +168,10 @@ void
 thread_wakeup (int64_t ticks)
 {
   struct list_elem *e = list_begin(&sleep_list);
-  /*struct list_elem *
-list_begin (struct list *list)
-{
-  ASSERT (list != NULL);
-  return list->head.next;
-}*/
+  
 while (e !=list_end(&sleep_list)){
   struct thread *t = list_entry(e, struct thread, elem);
-  /*#define list_entry(LIST_ELEM, STRUCT, MEMBER)           \
-        ((STRUCT *) ((uint8_t *) &(LIST_ELEM)->next     \
-                     - offsetof (STRUCT, MEMBER.next)))
-*/
+
 if (t->wakeuptime <= ticks){
   e =list_remove(e);
   thread_unblock(t);
@@ -195,32 +189,20 @@ thread_print_stats (void)
           idle_ticks, kernel_ticks, user_ticks);
 }
 
-
-/* 스레드를 ready_list에 추가할 때 순서에 맞게 삽입하도록 하는 코드 */
-void
-thread_add_to_ready_list(struct thread *t) 
-{
-  struct list_elem *e;
-
-  // 리스트가 비어있는 경우 t를 리스트에 삽입
-  if (list_empty(&ready_list)) {
-    list_push_back(&ready_list, &t->elem);
-    return;
+void change_occupation(void){
+  if (!list_empty (&ready_list) &&  thread_current()->priority < 
+  list_entry(list_front(&ready_list), struct thread, elem)->priority)
+  {
+    thread_yield();
   }
+}
 
-  // 리스트 순회
-  for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
-    struct thread *cur = list_entry(e, struct thread, elem); // ready_list에 들어가 있는 현재 스레드의 위치를 파악한다.
+/* thread_priority를 비교하는 함수 */
+bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    const struct thread *thread_a = list_entry(a, struct thread, elem);
+    const struct thread *thread_b = list_entry(b, struct thread, elem);
 
-    // 삽입할 위치를 찾으면 리스트에 삽입하고 함수를 종료한다.
-    if (t->priority > cur->priority) {
-      list_insert(e, &t->elem);
-      return;
-    }
-  }
-
-  // 리스트의 끝까지 순회한 경우 t를 리스트의 맨 뒤에 삽입합니다.
-  list_push_back(&ready_list, &t->elem);
+    return thread_a->priority > thread_b->priority;
 }
 
 /* Creates a new kernel thread named NAME with the given initial
@@ -283,7 +265,8 @@ thread_create (const char *name, int priority,
   intr_set_level (old_level);
 
   /* Add to run queue with priority */
-  thread_add_to_ready_list(&t);
+  thread_unblock (t);
+  change_occupation ();
 
   return tid;
 }
@@ -322,7 +305,7 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   //ready_list로 넣을 때 priority 지켜서 넣도록하는 함수
-  thread_add_to_ready_list(&t);
+  list_insert_ordered(&ready_list, &t->elem, compare_thread_priority, NULL);
   //list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
@@ -394,7 +377,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    thread_add_to_ready_list(&cur);
+    list_insert_ordered(&ready_list, &cur->elem, compare_thread_priority, NULL);
     //list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
@@ -422,10 +405,8 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  struct thread *cur = thread_current();
-  if (new_priority > cur->priority){
-      cur->priority = new_priority;
-  }
+  thread_current ()->priority = new_priority;
+  change_occupation ();
 }
 
 /* Returns the current thread's priority. */
@@ -545,18 +526,17 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
 
-  struct thread *cur = thread_current ();
-  // 기존에 실행중인 스레드와 우선순위 비교
-  if (cur->priority < priority)
-    thread_yield ();
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->init_priority = priority;
   t->magic = THREAD_MAGIC;
+
   list_push_back (&all_list, &t->allelem);
 }
+
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
    returns a pointer to the frame's base. */
@@ -651,6 +631,7 @@ schedule (void)
 
   if (cur != next)
     prev = switch_threads (cur, next);
+
   thread_schedule_tail (prev);
 }
 
