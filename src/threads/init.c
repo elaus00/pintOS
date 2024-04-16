@@ -238,6 +238,8 @@ parse_options (char **argv)
         usage ();
       else if (!strcmp (name, "-q"))
         shutdown_configure (SHUTDOWN_POWER_OFF);
+      else if (!strcmp (name, "-mlfqs"))
+        thread_mlfqs = true;
       else if (!strcmp (name, "-r"))
         shutdown_configure (SHUTDOWN_REBOOT);
 #ifdef FILESYS
