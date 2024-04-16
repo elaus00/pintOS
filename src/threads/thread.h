@@ -91,9 +91,12 @@ struct thread
     int priority;                       /* Priority. */
     int init_priority; // 초기 priority 값
     struct list_elem allelem;           /* List element for all threads list. */
+    struct list_elem elem;          
 
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+    struct list donation_list;
+    struct list_elem donation_list_elem;              /* List element. */
+    struct lock *wait_on_lock;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -146,6 +149,6 @@ int thread_get_load_avg (void);
 
 void change_occupation(void);
 bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-
+void donate_priority();
 
 #endif /* threads/thread.h */

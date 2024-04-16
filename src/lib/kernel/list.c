@@ -245,6 +245,8 @@ list_push_back (struct list *list, struct list_elem *elem)
        ...do something with e...
      }
 */
+
+//prev와 next를 재조정 하는것 만으로 리스트를 받지 않고도 리스트에서 삭제할 수 있다. 
 struct list_elem *
 list_remove (struct list_elem *elem)
 {
