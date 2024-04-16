@@ -113,12 +113,14 @@ sema_up (struct semaphore *sema)
   old_level = intr_disable ();
 
   ASSERT (sema != NULL);
-  ASSERT (intr_get_level () == INTR_OFF);
+  ASSERT (intr_get_level () == INTR_OFF); 
 
-  if (!list_empty (&sema->waiters)) 
+  if (!list_empty (&sema->waiters)) {
+    list_sort (&sema->waiters, compare_thread_priority, 0);
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+                                struct thread, elem));}
   sema->value++;
+  change_occupation();
   intr_set_level (old_level);
 }
 
@@ -213,6 +215,8 @@ lock_acquire (struct lock *lock)
   }
   
   sema_down (&lock->semaphore);
+
+  cur->wait_on_lock=NULL;
   lock->holder = thread_current ();
 
 }
