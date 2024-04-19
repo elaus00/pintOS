@@ -149,6 +149,9 @@ int thread_get_load_avg (void);
 
 void change_occupation(void);
 bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-void donate_priority();
+bool compare_donation_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+void donate_priority(void);
+void refresh_priority(void);
+void empty_out_donation(struct lock *lock);
 
 #endif /* threads/thread.h */
