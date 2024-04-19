@@ -24,6 +24,13 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+#define LOAD_AVG 0
+#define LOAD_AVG_DEFAULT 0
+#define RECENT_CPU_DEFAULT 0
+#define NICE_DEFAULT 0
+#define NICE_MIN -20
+#define NICE_MAX 20
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -98,6 +105,11 @@ struct thread
     struct list_elem donation_list_elem;              /* List element. */
     struct lock *wait_on_lock;
 
+    /*BSD Scheduler*/
+    int nice;
+    int recent_cpu;
+
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -146,6 +158,7 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void update_recent_cpu (void);
 
 void change_occupation(void);
 bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
@@ -153,5 +166,13 @@ bool compare_donation_priority(const struct list_elem *a, const struct list_elem
 void donate_priority(void);
 void refresh_priority(void);
 void empty_out_donation(struct lock *lock);
+
+void recalculate_priority(struct thread *t);
+void calculate_load_avg (struct thread *t);
+
+void increment_recent_cpu (void);
+void update_all_priority(void);
+void update_all_recent_cpu(void);
+void recalculate_recent_cpu(struct thread *t);
 
 #endif /* threads/thread.h */
