@@ -184,7 +184,6 @@ void thread_print_stats(void)
 
 void change_occupation(void)
 {
-
   // ASSERT (intr_get_level () == INTR_OFF);
   if (!list_empty(&ready_list) && thread_current()->priority <
                                       list_entry(list_front(&ready_list), struct thread, elem)->priority)
@@ -198,6 +197,14 @@ bool compare_thread_priority(const struct list_elem *a, const struct list_elem *
 {
   const struct thread *thread_a = list_entry(a, struct thread, elem);
   const struct thread *thread_b = list_entry(b, struct thread, elem);
+
+  return thread_a->priority > thread_b->priority;
+}
+
+bool compare_donation_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  const struct thread *thread_a = list_entry(a, struct thread, donation_list_elem);
+  const struct thread *thread_b = list_entry(b, struct thread, donation_list_elem);
 
   return thread_a->priority > thread_b->priority;
 }
@@ -395,6 +402,8 @@ void thread_foreach(thread_action_func *func, void *aux)
 void thread_set_priority(int new_priority)
 {
   thread_current()->priority = new_priority;
+  thread_current()->init_priority = new_priority;
+  refresh_priority();
   change_occupation();
 }
 
@@ -638,8 +647,46 @@ allocate_tid(void)
 
 void donate_priority()
 {
+  int depth;
+  struct thread *cur = thread_current();
+  int max_depth = 8;
+
+  for (depth = 0; depth < max_depth; depth++){
+    if (cur->wait_on_lock != NULL) 
+    {
+      struct thread *holder = cur->wait_on_lock->holder;
+      holder->priority = cur->priority;
+      cur = holder;
+    }
+  }
 }
 
+void refresh_priority()
+{
+  struct thread *cur = thread_current();
+  int highest_priority;
+  cur->priority = cur->init_priority;
+  
+  if (!list_empty(&cur->donation_list)){
+    highest_priority = list_entry(list_front(&cur->donation_list), struct thread, donation_list_elem)->priority;
+    cur->priority = highest_priority;
+  }
+}
+
+void empty_out_donation (struct lock *lock){
+  struct thread *cur = thread_current();
+  struct list_elem *e = list_begin(&cur->donation_list);
+
+    while (e != list_end(&cur->donation_list)) {
+        struct thread *t = list_entry(e, struct thread, donation_list_elem);
+        
+        if (t->wait_on_lock == lock) {
+            list_remove(&t->donation_list_elem);
+        }
+        e = list_next(e);
+    }
+}
+  
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
