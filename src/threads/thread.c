@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -11,6 +12,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed_point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -74,6 +76,9 @@ static void schedule(void);
 void thread_schedule_tail(struct thread *prev);
 static tid_t allocate_tid(void);
 
+// Initailization for BSD Schdeuler elements
+int load_avg;
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -115,29 +120,11 @@ void thread_start(void)
   /* Start preemptive thread scheduling. */
   intr_enable();
 
+  // load_avg initialization
+  load_avg = LOAD_AVG_DEFAULT;
+
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down(&idle_started);
-}
-
-/* Called by the timer interrupt handler at each timer tick.
-   Thus, this function runs in an external interrupt context. */
-void thread_tick(void)
-{
-  struct thread *t = thread_current();
-
-  /* Update statistics. */
-  if (t == idle_thread)
-    idle_ticks++;
-#ifdef USERPROG
-  else if (t->pagedir != NULL)
-    user_ticks++;
-#endif
-  else
-    kernel_ticks++;
-
-  /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
-    intr_yield_on_return();
 }
 
 /*Chanhaeng's code*/
@@ -401,6 +388,10 @@ void thread_foreach(thread_action_func *func, void *aux)
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority)
 {
+  if (thread_mlfqs)
+  {
+    return;
+  }
   thread_current()->priority = new_priority;
   thread_current()->init_priority = new_priority;
   refresh_priority();
@@ -413,31 +404,150 @@ int thread_get_priority(void)
   return thread_current()->priority;
 }
 
-/* Sets the current thread's nice value to NICE. */
-void thread_set_nice(int nice UNUSED)
+// nice, priority는 정수값
+// recent_cpu, load_avg는 실수값을 갖는다.
+
+/* Calculate load_avg */
+void calculate_load_avg(void)
 {
-  /* Not yet implemented. */
+  int ready_threads;
+  // ready_list 요소 숫자 + 현재 실행중인 스레드
+
+  if (thread_current() == idle_thread)
+    ready_threads = list_size(&ready_list);
+  else
+    ready_threads = list_size(&ready_list) + 1;
+
+  // 초기 load_avg는 0. 동작중인 스레드가 소비한 CPU 시간에 대한 가중평균
+  load_avg = add_fp(mult_fp(div_fp(int_to_fp(59), int_to_fp(60)), load_avg),
+                    mult_mixed(div_fp(int_to_fp(1), int_to_fp(60)), ready_threads));
+}
+
+// 스레드 recent_cpu 재계산
+void recalculate_recent_cpu(struct thread *t)
+{
+  int decay;
+
+  if (t == idle_thread)
+    return;
+
+  /* decay 계산 */
+  decay = div_fp(mult_mixed(load_avg, 2), add_mixed(mult_mixed(load_avg, 2), 1));
+
+  /* recent_cpu 계산 */
+  t->recent_cpu = add_mixed(mult_fp(decay, t->recent_cpu), t->nice);
+}
+
+// 현재 스레드의 recent_cpu를 1 증가
+void increment_recent_cpu(void)
+{
+  struct thread *cur = thread_current();
+  if (cur != idle_thread)
+    cur->recent_cpu = add_mixed(cur->recent_cpu, 1);
+}
+
+// 모든 스레드의 recent_cpu를 업데이트
+void update_all_recent_cpu(void)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  /* all_list를 순회하며 모든 스레드의 recent cpu를 업데이트*/
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    t = list_entry(e, struct thread, allelem);
+    recalculate_recent_cpu(t);
+  }
+}
+
+// 특정 스레드의 priority를 다시게산
+void recalculate_priority(struct thread *t)
+{
+  if (t == idle_thread)
+    return;
+
+  int new_priority = fp_to_int(sub_fp(sub_mixed(PRI_MAX, div_mixed(t->recent_cpu, 4)), int_to_fp(t->nice) * 2));
+
+  // if (new_priority > PRI_MAX)
+  //   new_priority = PRI_MAX;
+  // else if (new_priority < PRI_MIN)
+  //   new_priority = PRI_MIN;
+
+  t->priority = new_priority;
+}
+
+// 모든 스레드의 priority를 업데이트
+void update_all_priority(void)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  /* all_list를 순회하며 스레드의 priority를 재계산*/
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    t = list_entry(e, struct thread, allelem);
+    recalculate_priority(t); // 스레드의 priority 재계산
+  }
+}
+
+/* Called by the timer interrupt handler at each timer tick.
+   Thus, this function runs in an external interrupt context. */
+void thread_tick()
+{
+  struct thread *t = thread_current();
+
+  /* Update statistics. */
+  if (t == idle_thread)
+    idle_ticks++;
+#ifdef USERPROG
+  else if (t->pagedir != NULL)
+    user_ticks++;
+#endif
+  else
+    kernel_ticks++;
+
+  /* Enforce preemption. */
+  if (++thread_ticks >= TIME_SLICE)
+  {
+    intr_yield_on_return();
+  }
+}
+
+/* Sets the current thread's nice value to NICE. */
+void thread_set_nice(int new_nice)
+{
+  enum intr_level old_level = intr_disable();
+  thread_current()->nice = new_nice;
+  recalculate_priority(thread_current());
+  change_occupation();
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's nice value. */
 int thread_get_nice(void)
 {
-  /* Not yet implemented. */
-  return 0;
+  enum intr_level old_level = intr_disable();
+  int nice = thread_current()->nice;
+  intr_set_level(old_level);
+  return nice;
 }
 
 /* Returns 100 times the system load average. */
 int thread_get_load_avg(void)
 {
-  /* Not yet implemented. */
-  return 0;
+  enum intr_level old_level = intr_disable();
+  int load_avg_value = fp_to_int_round(mult_mixed(load_avg, 100));
+  intr_set_level(old_level);
+  return load_avg_value;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int thread_get_recent_cpu(void)
 {
-  /* Not yet implemented. */
-  return 0;
+  enum intr_level old_level = intr_disable();
+  int recent_cpu = fp_to_int_round(mult_mixed(thread_current()->recent_cpu, 100));
+  intr_set_level(old_level);
+  return recent_cpu;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -530,6 +640,9 @@ init_thread(struct thread *t, const char *name, int priority)
   t->wait_on_lock = NULL;
   list_init(&t->donation_list);
 
+  t->nice = NICE_DEFAULT;
+  t->recent_cpu = RECENT_CPU_DEFAULT;
+
   t->magic = THREAD_MAGIC;
 
   list_push_back(&all_list, &t->allelem);
@@ -614,22 +727,6 @@ void thread_schedule_tail(struct thread *prev)
 
    It's not safe to call printf() until thread_schedule_tail()
    has completed. */
-static void
-schedule(void)
-{
-  struct thread *cur = running_thread();
-  struct thread *next = next_thread_to_run();
-  struct thread *prev = NULL;
-
-  ASSERT(intr_get_level() == INTR_OFF);
-  ASSERT(cur->status != THREAD_RUNNING);
-  ASSERT(is_thread(next));
-
-  if (cur != next)
-    prev = switch_threads(cur, next);
-
-  thread_schedule_tail(prev);
-}
 
 /* Returns a tid to use for a new thread. */
 static tid_t
@@ -651,8 +748,9 @@ void donate_priority()
   struct thread *cur = thread_current();
   int max_depth = 8;
 
-  for (depth = 0; depth < max_depth; depth++){
-    if (cur->wait_on_lock != NULL) 
+  for (depth = 0; depth < max_depth; depth++)
+  {
+    if (cur->wait_on_lock != NULL)
     {
       struct thread *holder = cur->wait_on_lock->holder;
       holder->priority = cur->priority;
@@ -666,27 +764,49 @@ void refresh_priority()
   struct thread *cur = thread_current();
   int highest_priority;
   cur->priority = cur->init_priority;
-  
-  if (!list_empty(&cur->donation_list)){
+
+  if (!list_empty(&cur->donation_list))
+  {
     highest_priority = list_entry(list_front(&cur->donation_list), struct thread, donation_list_elem)->priority;
     cur->priority = highest_priority;
   }
 }
 
-void empty_out_donation (struct lock *lock){
+void empty_out_donation(struct lock *lock)
+{
   struct thread *cur = thread_current();
   struct list_elem *e = list_begin(&cur->donation_list);
 
-    while (e != list_end(&cur->donation_list)) {
-        struct thread *t = list_entry(e, struct thread, donation_list_elem);
-        
-        if (t->wait_on_lock == lock) {
-            list_remove(&t->donation_list_elem);
-        }
-        e = list_next(e);
+  while (e != list_end(&cur->donation_list))
+  {
+    struct thread *t = list_entry(e, struct thread, donation_list_elem);
+
+    if (t->wait_on_lock == lock)
+    {
+      list_remove(&t->donation_list_elem);
     }
+    e = list_next(e);
+  }
 }
-  
+
+static void
+schedule(void)
+{
+  struct thread *cur = running_thread();
+  struct thread *next = next_thread_to_run();
+  struct thread *prev = NULL;
+
+  // ASSERT(!list_empty(&ready_list));
+  ASSERT(intr_get_level() == INTR_OFF);
+  ASSERT(cur->status != THREAD_RUNNING);
+  ASSERT(is_thread(next));
+
+  if (cur != next)
+    prev = switch_threads(cur, next);
+
+  thread_schedule_tail(prev);
+}
+
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
