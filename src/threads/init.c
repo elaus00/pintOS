@@ -228,17 +228,15 @@ static char **
 parse_options(char **argv)
 {
   for (; *argv != NULL && **argv == '-'; argv++)
-  {
-    char *save_ptr;
-    char *name = strtok_r(*argv, "=", &save_ptr);
-    char *value = strtok_r(NULL, "", &save_ptr);
-
+    {
+      char *save_ptr;
+      char *name = strtok_r (*argv, "=", &save_ptr);
+      char *value = strtok_r (NULL, "", &save_ptr);
+      
     if (!strcmp(name, "-h"))
       usage();
     else if (!strcmp(name, "-q"))
       shutdown_configure(SHUTDOWN_POWER_OFF);
-    else if (!strcmp(name, "-mlfqs"))
-      thread_mlfqs = true;
     else if (!strcmp(name, "-r"))
       shutdown_configure(SHUTDOWN_REBOOT);
 #ifdef FILESYS
