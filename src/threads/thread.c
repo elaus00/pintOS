@@ -505,8 +505,7 @@ void recalculate_priority(struct thread *t)
   if (t == idle_thread)
     return;
 
-  int new_priority = fp_to_int (add_mixed (div_mixed (t->recent_cpu, -4), PRI_MAX - t->nice * 2));
-  //int new_priority = fp_to_int(sub_fp(sub_mixed(PRI_MAX, div_fp(t->recent_cpu, int_to_fp(4))), int_to_fp(t->nice) * 2));
+  int new_priority = fp_to_int(sub_fp(sub_mixed(div_mixed(t->recent_cpu, -4), -PRI_MAX), int_to_fp(t->nice) * 2));
 
   // if (new_priority > PRI_MAX)
   //   new_priority = PRI_MAX;
@@ -551,6 +550,43 @@ void thread_tick()
   {
     intr_yield_on_return();
   }
+}
+
+/* Sets the current thread's nice value to NICE. */
+void thread_set_nice(int new_nice UNUSED)
+{
+  enum intr_level old_level = intr_disable();
+  thread_current()->nice = new_nice;
+  recalculate_priority(thread_current());
+  change_occupation();
+  intr_set_level(old_level);
+}
+
+/* Returns the current thread's nice value. */
+int thread_get_nice(void)
+{
+  enum intr_level old_level = intr_disable();
+  int nice = thread_current()->nice;
+  intr_set_level(old_level);
+  return nice;
+}
+
+/* Returns 100 times the system load average. */
+int thread_get_load_avg(void)
+{
+  enum intr_level old_level = intr_disable();
+  int load_avg_value = fp_to_int_round(mult_mixed(load_avg, 100));
+  intr_set_level(old_level);
+  return load_avg_value;
+}
+
+/* Returns 100 times the current thread's recent_cpu value. */
+int thread_get_recent_cpu(void)
+{
+  enum intr_level old_level = intr_disable();
+  int recent_cpu = fp_to_int_round(mult_mixed(thread_current()->recent_cpu, 100));
+  intr_set_level(old_level);
+  return recent_cpu;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
