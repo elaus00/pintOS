@@ -112,6 +112,9 @@ void thread_init(void)
    Also creates the idle thread. */
 void thread_start(void)
 {
+  // load_avg initialization
+  load_avg = LOAD_AVG_DEFAULT;
+
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init(&idle_started, 0);
@@ -120,8 +123,6 @@ void thread_start(void)
   /* Start preemptive thread scheduling. */
   intr_enable();
 
-  // load_avg initialization
-  load_avg = LOAD_AVG_DEFAULT;
 
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down(&idle_started);
@@ -404,6 +405,43 @@ int thread_get_priority(void)
   return thread_current()->priority;
 }
 
+/* Sets the current thread's nice value to NICE. */
+void thread_set_nice(int new_nice)
+{
+  enum intr_level old_level = intr_disable();
+  thread_current()->nice = new_nice;
+  recalculate_priority(thread_current());
+  change_occupation();
+  intr_set_level(old_level);
+}
+
+/* Returns the current thread's nice value. */
+int thread_get_nice(void)
+{
+  enum intr_level old_level = intr_disable();
+  int nice = thread_current()->nice;
+  intr_set_level(old_level);
+  return nice;
+}
+
+/* Returns 100 times the system load average. */
+int thread_get_load_avg(void)
+{
+  enum intr_level old_level = intr_disable();
+  int load_avg_value = fp_to_int (mult_mixed(load_avg, 100));
+  intr_set_level(old_level);
+  return load_avg_value;
+}
+
+/* Returns 100 times the current thread's recent_cpu value. */
+int thread_get_recent_cpu(void)
+{
+  enum intr_level old_level = intr_disable();
+  int recent_cpu = fp_to_int_round(mult_mixed(thread_current()->recent_cpu, 100));
+  intr_set_level(old_level);
+  return recent_cpu;
+}
+
 // nice, priority는 정수값
 // recent_cpu, load_avg는 실수값을 갖는다.
 
@@ -419,8 +457,9 @@ void calculate_load_avg(void)
     ready_threads = list_size(&ready_list) + 1;
 
   // 초기 load_avg는 0. 동작중인 스레드가 소비한 CPU 시간에 대한 가중평균
-  load_avg = add_fp(mult_fp(div_fp(int_to_fp(59), int_to_fp(60)), load_avg),
+  int result = add_fp(mult_fp(div_fp(int_to_fp(59), int_to_fp(60)), load_avg),
                     mult_mixed(div_fp(int_to_fp(1), int_to_fp(60)), ready_threads));
+  load_avg = result;
 }
 
 // 스레드 recent_cpu 재계산
@@ -466,7 +505,8 @@ void recalculate_priority(struct thread *t)
   if (t == idle_thread)
     return;
 
-  int new_priority = fp_to_int(sub_fp(sub_mixed(PRI_MAX, div_mixed(t->recent_cpu, 4)), int_to_fp(t->nice) * 2));
+  int new_priority = fp_to_int (add_mixed (div_mixed (t->recent_cpu, -4), PRI_MAX - t->nice * 2));
+  //int new_priority = fp_to_int(sub_fp(sub_mixed(PRI_MAX, div_fp(t->recent_cpu, int_to_fp(4))), int_to_fp(t->nice) * 2));
 
   // if (new_priority > PRI_MAX)
   //   new_priority = PRI_MAX;
@@ -511,43 +551,6 @@ void thread_tick()
   {
     intr_yield_on_return();
   }
-}
-
-/* Sets the current thread's nice value to NICE. */
-void thread_set_nice(int new_nice)
-{
-  enum intr_level old_level = intr_disable();
-  thread_current()->nice = new_nice;
-  recalculate_priority(thread_current());
-  change_occupation();
-  intr_set_level(old_level);
-}
-
-/* Returns the current thread's nice value. */
-int thread_get_nice(void)
-{
-  enum intr_level old_level = intr_disable();
-  int nice = thread_current()->nice;
-  intr_set_level(old_level);
-  return nice;
-}
-
-/* Returns 100 times the system load average. */
-int thread_get_load_avg(void)
-{
-  enum intr_level old_level = intr_disable();
-  int load_avg_value = fp_to_int_round(mult_mixed(load_avg, 100));
-  intr_set_level(old_level);
-  return load_avg_value;
-}
-
-/* Returns 100 times the current thread's recent_cpu value. */
-int thread_get_recent_cpu(void)
-{
-  enum intr_level old_level = intr_disable();
-  int recent_cpu = fp_to_int_round(mult_mixed(thread_current()->recent_cpu, 100));
-  intr_set_level(old_level);
-  return recent_cpu;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
