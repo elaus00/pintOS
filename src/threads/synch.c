@@ -241,13 +241,14 @@ void lock_release(struct lock *lock)
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
-  empty_out_donation(lock);
-  refresh_priority();
-
   lock->holder = NULL;
 
-  while(thread_mlfqs)
-    sema_up(&lock->semaphore);
+  while (!thread_mlfqs)
+  {
+    empty_out_donation(lock);
+    refresh_priority();
+  }
+  sema_up(&lock->semaphore);
 }
 
 /* One semaphore in a list. */

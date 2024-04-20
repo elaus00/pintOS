@@ -466,7 +466,7 @@ int thread_get_recent_cpu(void)
 
 void recalculate_recent_cpu(struct thread *t)
 {
-  int decay, recent_cpu;
+  int decay, new_recent_cpu;
 
   if (t == idle_thread)
     return;
@@ -475,7 +475,7 @@ void recalculate_recent_cpu(struct thread *t)
   decay = div_fp(mult_fp(load_avg, 2), add_fp(mult_fp(2, load_avg), 1));
 
   /* recent_cpu 계산 */
-  recent_cpu = add_mixed(mult_fp(decay, t->recent_cpu), t->nice);
+  new_recent_cpu = add_mixed(mult_fp(decay, t->recent_cpu), t->nice);
 }
 
 // 특정 스레드의 priority를 다시게산
@@ -487,8 +487,8 @@ void recalculate_priority(struct thread *t)
     return;
 
   // 새 우선순위 계산
-  int new_priority = fp_to_int(add_mixed(div_mixed(t->recent_cpu, 4), PRI_MAX - t->nice * 2));
-
+  int new_priority = fp_to_int(sub_fp(sub_mixed(PRI_MAX, div_mixed(t->recent_cpu, 4)), int_to_fp(t->nice)*2));
+    
   if (new_priority > PRI_MAX)
     new_priority = PRI_MAX;
   else if (new_priority < PRI_MIN)
@@ -711,22 +711,6 @@ void thread_schedule_tail(struct thread *prev)
 
    It's not safe to call printf() until thread_schedule_tail()
    has completed. */
-static void
-schedule(void)
-{
-  struct thread *cur = running_thread();
-  struct thread *next = next_thread_to_run();
-  struct thread *prev = NULL;
-
-  ASSERT(intr_get_level() == INTR_OFF);
-  ASSERT(cur->status != THREAD_RUNNING);
-  ASSERT(is_thread(next));
-
-  if (cur != next)
-    prev = switch_threads(cur, next);
-
-  thread_schedule_tail(prev);
-}
 
 /* Returns a tid to use for a new thread. */
 static tid_t
@@ -787,6 +771,24 @@ void empty_out_donation(struct lock *lock)
     }
     e = list_next(e);
   }
+}
+
+static void
+schedule(void)
+{
+  struct thread *cur = running_thread();
+  struct thread *next = next_thread_to_run();
+  struct thread *prev = NULL;
+
+  //ASSERT(!list_empty(&ready_list));
+  ASSERT(intr_get_level() == INTR_OFF);
+  ASSERT(cur->status != THREAD_RUNNING);
+  ASSERT(is_thread(next));
+
+  if (cur != next)
+    prev = switch_threads(cur, next);
+
+  thread_schedule_tail(prev);
 }
 
 /* Offset of `stack' member within `struct thread'.
