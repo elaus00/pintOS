@@ -127,27 +127,6 @@ void thread_start(void)
   sema_down(&idle_started);
 }
 
-/* Called by the timer interrupt handler at each timer tick.
-   Thus, this function runs in an external interrupt context. */
-void thread_tick(void)
-{
-  struct thread *t = thread_current();
-
-  /* Update statistics. */
-  if (t == idle_thread)
-    idle_ticks++;
-#ifdef USERPROG
-  else if (t->pagedir != NULL)
-    user_ticks++;
-#endif
-  else
-    kernel_ticks++;
-
-  /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
-    intr_yield_on_return();
-}
-
 /*Chanhaeng's code*/
 void thread_sleep(int64_t ticks)
 {
@@ -409,7 +388,9 @@ void thread_foreach(thread_action_func *func, void *aux)
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority)
 {
-  ASSERT (!thread_mlfqs);
+  if (thread_mlfqs){
+    return;                                                               
+  }
   thread_current()->priority = new_priority;
   thread_current()->init_priority = new_priority;
   refresh_priority();
@@ -425,99 +406,82 @@ int thread_get_priority(void)
 /* Sets the current thread's nice value to NICE. */
 void thread_set_nice(int new_nice)
 {
+  enum intr_level old_level = intr_disable ();
   thread_current()->nice = new_nice;
+  recalculate_priority (thread_current());
+  change_occupation();
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's nice value. */
 int thread_get_nice(void)
 {
-  return thread_current()->nice;
+  enum intr_level old_level = intr_disable ();
+  int nice = thread_current () -> nice;
+  intr_set_level(old_level);
+  return nice;
 }
 
 /* Returns 100 times the system load average. */
 int thread_get_load_avg(void)
 {
-    if (timer_ticks() % TIMER_FREQ == 0)
-      return fp_to_int_round (mult_mixed (load_avg, 100));
-  return 0;
+  enum intr_level old_level = intr_disable ();
+  int load_avg_value = fp_to_int_round(mult_mixed(load_avg, 100));
+  intr_set_level(old_level);
+  return load_avg_value;
+}
+
+/* Returns 100 times the current thread's recent_cpu value. */
+int thread_get_recent_cpu(void)
+{
+  enum intr_level old_level = intr_disable ();
+  int recent_cpu = fp_to_int(mult_mixed(thread_current()->recent_cpu, 100));
+  intr_set_level (old_level);
+  return recent_cpu;
 }
 
 // nice, priority는 정수값
 // recent_cpu, load_avg는 실수값을 갖는다.
 
 /* Calculate load_avg */
-void calculate_load_avg(struct thread *t)
+void calculate_load_avg()
 {
-  int recent_cpu, decay, ready_threads_num;
+  int recent_cpu, decay, ready_threads;
   // ready_list 요소 숫자 + 현재 실행중인 스레드
-  // 현재 스레드가 idle_thread인 경우를 별도로 분리해서 생각해야 하나?
-
-  ready_threads_num = list_size(&ready_list) + 1;
+ 
+  if (thread_current() == idle_thread)
+  {
+    ready_threads = list_size(&ready_list);
+  } else {
+    ready_threads = list_size(&ready_list) + 1;
+  }
+  
   // 초기 load_avg는 0. 동작중인 스레드가 소비한 CPU 시간에 대한 가중평균
   load_avg = add_fp(mult_fp(div_fp(int_to_fp(59), int_to_fp(60)), load_avg),
-                    mult_fp(div_fp(int_to_fp(1), int_to_fp(60)), ready_threads_num));
+                    mult_mixed(div_fp(int_to_fp(1), int_to_fp(60)), ready_threads));
 }
 
-/* Returns 100 times the current thread's recent_cpu value. */
-int thread_get_recent_cpu(void)
-{
-  return fp_to_int(mult_mixed(thread_current()->recent_cpu, 100));
-}
-
+// 스레드 recent_cpu 재계산
 void recalculate_recent_cpu(struct thread *t)
 {
-  int decay, new_recent_cpu;
+  int decay;
 
   if (t == idle_thread)
     return;
 
   /* decay 계산 */
-  decay = div_fp(mult_fp(load_avg, 2), add_fp(mult_fp(2, load_avg), 1));
+  decay = div_fp(mult_mixed(load_avg, 2), add_mixed(mult_mixed(load_avg, 2), 1));
 
   /* recent_cpu 계산 */
-  new_recent_cpu = add_mixed(mult_fp(decay, t->recent_cpu), t->nice);
+  t->recent_cpu = add_mixed(mult_fp(decay, t->recent_cpu), t->nice);
 }
 
-// 특정 스레드의 priority를 다시게산
-void recalculate_priority(struct thread *t)
-{
-  struct list_elem *e;
-
-  if (t == idle_thread)
-    return;
-
-  // 새 우선순위 계산
-  int new_priority = fp_to_int(sub_fp(sub_mixed(PRI_MAX, div_mixed(t->recent_cpu, 4)), int_to_fp(t->nice)*2));
-    
-  if (new_priority > PRI_MAX)
-    new_priority = PRI_MAX;
-  else if (new_priority < PRI_MIN)
-    new_priority = PRI_MIN;
-
-  t->priority = new_priority;
-}
-
-// 개별 스레드의 recent_cpu를 1 증가
+// 현재 스레드의 recent_cpu를 1 증가
 void increment_recent_cpu(void)
 {
   struct thread *cur = thread_current();
-  if (cur == idle_thread)
-    return;
-  cur->recent_cpu = add_mixed(cur->recent_cpu, 1);
-}
-
-// 모든 스레드의 priority를 업데이트
-void update_all_priority(void)
-{
-  struct list_elem *e;
-  struct thread *t;
-
-  /* all_list를 순회하며 스레드의 priority를 재계산*/
-  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
-  {
-    t = list_entry(e, struct thread, allelem);
-    recalculate_priority(&t); // 스레드의 priority 재계산
-  }
+  if (cur != idle_thread)
+      cur->recent_cpu = add_mixed(cur->recent_cpu, 1);
 }
 
 // 모든 스레드의 recent_cpu를 업데이트
@@ -530,7 +494,75 @@ void update_all_recent_cpu(void)
   for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
   {
     t = list_entry(e, struct thread, allelem);
-    recalculate_recent_cpu(&t);
+    recalculate_recent_cpu(t);
+  }
+}
+
+// 특정 스레드의 priority를 다시게산
+void recalculate_priority(struct thread *t)
+{
+  struct list_elem *e;
+
+  if (t == idle_thread)
+    return;
+
+  int new_priority = fp_to_int(sub_fp(sub_mixed(PRI_MAX, div_mixed(t->recent_cpu, 4)), int_to_fp(t->nice) * 2));
+
+  // if (new_priority > PRI_MAX)
+  //   new_priority = PRI_MAX;
+  // else if (new_priority < PRI_MIN)
+  //   new_priority = PRI_MIN;
+
+  t->priority = new_priority;
+}
+
+// 모든 스레드의 priority를 업데이트
+void update_all_priority(void)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  /* all_list를 순회하며 스레드의 priority를 재계산*/
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    t = list_entry(e, struct thread, allelem);
+    recalculate_priority(t); // 스레드의 priority 재계산
+  }
+}
+
+/* Called by the timer interrupt handler at each timer tick.
+   Thus, this function runs in an external interrupt context. */
+void thread_tick(void)
+{
+  struct thread *t = thread_current();
+
+  /* Update statistics. */
+  if (t == idle_thread)
+    idle_ticks++;
+#ifdef USERPROG
+  else if (t->pagedir != NULL)
+    user_ticks++;
+#endif
+  else
+    kernel_ticks++;
+
+  /* Enforce preemption. */
+  if (++thread_ticks >= TIME_SLICE)
+  {
+    intr_yield_on_return();
+  }
+
+  if (thread_mlfqs)
+  {
+    increment_recent_cpu();
+    if (timer_ticks() % 4 == 0)
+    {
+      update_all_priority();
+      if (timer_ticks() % TIMER_FREQ == 0){
+        calculate_load_avg();
+        update_all_recent_cpu();
+      }
+    }
   }
 }
 
@@ -780,7 +812,7 @@ schedule(void)
   struct thread *next = next_thread_to_run();
   struct thread *prev = NULL;
 
-  //ASSERT(!list_empty(&ready_list));
+  // ASSERT(!list_empty(&ready_list));
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(cur->status != THREAD_RUNNING);
   ASSERT(is_thread(next));

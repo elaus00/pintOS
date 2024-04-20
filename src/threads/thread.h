@@ -168,7 +168,7 @@ void refresh_priority(void);
 void empty_out_donation(struct lock *lock);
 
 void recalculate_priority(struct thread *t);
-void calculate_load_avg (struct thread *t);
+void calculate_load_avg ();
 
 void increment_recent_cpu (void);
 void update_all_priority(void);
